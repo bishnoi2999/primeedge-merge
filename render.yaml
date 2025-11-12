@@ -1,0 +1,11 @@
+services:
+  - type: web
+    name: primeedge-merge
+    env: python
+    plan: free
+    buildCommand: pip install -r requirements.txt
+    startCommand: gunicorn server:app --preload --workers=1 --threads=2 --timeout=120
+    autoDeploy: true
+    envVars:
+      - key: OUTPUT_DIR
+        value: static/output
