@@ -30,9 +30,11 @@ def concat_videos_ffmpeg(inputs: List[str], output_path: str):
     try:
         filelist = os.path.join(tmpdir, "filelist.txt")
         with open(filelist, "w", encoding="utf-8") as f:
-            for p in inputs:
-                # Ensure single quotes are escaped
-                f.write(f"file '{p.replace(\"'\", \"'\\\\''\")}'\n")
+    for p in inputs:
+        safe_p = p.replace("'", "'\\''")  # escape single quotes safely
+        f.write(f"file '{safe_p}'\n")
+
+
 
         # Use stream copy to keep quality/fast merge; re-mux to MP4 (H.264 + AAC prefer)
         cmd = [
