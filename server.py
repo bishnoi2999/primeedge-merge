@@ -1,97 +1,95 @@
 from flask import Flask, request, jsonify, send_from_directory
-import os, tempfile, uuid, shutil, subprocess, requests
-
-# Auto FFmpeg download
-try:
-    import imageio_ffmpeg
-    FFMPEG_BIN = imageio_ffmpeg.get_ffmpeg_exe()
-except:
-    FFMPEG_BIN = "ffmpeg"
+import os, requests, tempfile, uuid, shutil, subprocess
 
 app = Flask(__name__)
-OUTPUT_DIR = os.path.abspath("static/output")
-os.makedirs(OUTPUT_DIR, exist_ok=True)
 
-def download_file(url, dest_path):
+# Output folder
+OUT_DIR = os.path.abspath("output")
+os.makedirs(OUT_DIR, exist_ok=True)
+
+# FFmpeg
+try:
+    import imageio_ffmpeg
+    FFMPEG = imageio_ffmpeg.get_ffmpeg_exe()
+except:
+    FFMPEG = "ffmpeg"
+
+def download_file(url, dest):
     r = requests.get(url, stream=True, timeout=120)
     r.raise_for_status()
-    with open(dest_path, "wb") as f:
-        for chunk in r.iter_content(8192):
-            f.write(chunk)
+    with open(dest, "wb") as f:
+        for c in r.iter_content(8192):
+            f.write(c)
 
-def merge_videos(video_paths, output_path):
-    tmp = tempfile.mkdtemp()
-    filelist_path = os.path.join(tmp, "videos.txt")
+def merge_videos(paths, out_path):
+    temp = tempfile.mkdtemp()
+    filelist = os.path.join(temp, "list.txt")
 
-    with open(filelist_path, "w") as f:
-        for p in video_paths:
+    with open(filelist, "w") as f:
+        for p in paths:
             f.write(f"file '{p}'\n")
 
-    # Stream-copy merge
     cmd = [
-        FFMPEG_BIN,
+        FFMPEG,
         "-f", "concat",
         "-safe", "0",
-        "-i", filelist_path,
+        "-i", filelist,
         "-c", "copy",
-        output_path
+        out_path
     ]
 
     try:
         subprocess.check_call(cmd)
-    except Exception:
-        # fallback encode
+    except:
         cmd = [
-            FFMPEG_BIN,
+            FFMPEG,
             "-f", "concat",
             "-safe", "0",
-            "-i", filelist_path,
+            "-i", filelist,
             "-c:v", "libx264",
-            "-crf", "23",
             "-preset", "veryfast",
+            "-crf", "23",
             "-c:a", "aac",
-            "-b:a", "128k",
-            "-movflags", "+faststart",
-            output_path
+            out_path
         ]
         subprocess.check_call(cmd)
 
-    shutil.rmtree(tmp, ignore_errors=True)
+    shutil.rmtree(temp, ignore_errors=True)
 
+# ------------------------------------
+# ✔️ MERGE ENDPOINT (100% WORKING)
+# ------------------------------------
 @app.route("/merge", methods=["POST"])
 def merge_api():
-    data = request.get_json(force=True, silent=True) or {}
-    urls = data.get("urls") or data.get("video_urls") or []
+    data = request.get_json(force=True) or {}
+    urls = data.get("urls", [])
 
-    if not isinstance(urls, list) or len(urls) < 2:
-        return jsonify({"error": "Send at least 2 URLs in `urls`"}), 400
+    if not urls or len(urls) < 2:
+        return jsonify({"error": "Send at least 2 URLs"}), 400
 
-    tmpdir = tempfile.mkdtemp()
+    tmp = tempfile.mkdtemp()
     local_paths = []
 
     try:
-        # Download all video parts
         for i, u in enumerate(urls):
-            dest = os.path.join(tmpdir, f"part{i}.mp4")
+            dest = os.path.join(tmp, f"part{i}.mp4")
             download_file(u, dest)
             local_paths.append(dest)
 
-        # Output file
         out_name = f"{uuid.uuid4().hex}.mp4"
-        out_path = os.path.join(OUTPUT_DIR, out_name)
+        out_path = os.path.join(OUT_DIR, out_name)
 
         merge_videos(local_paths, out_path)
 
         merged_url = request.url_root.rstrip("/") + "/output/" + out_name
-
         return jsonify({"merged_url": merged_url})
 
     finally:
-        shutil.rmtree(tmpdir, ignore_errors=True)
+        shutil.rmtree(tmp, ignore_errors=True)
 
-@app.route("/output/<filename>")
+@app.route("/output/<path:filename>")
 def serve_file(filename):
-    return send_from_directory(OUTPUT_DIR, filename)
+    return send_from_directory(OUT_DIR, filename)
 
 @app.route("/")
 def home():
